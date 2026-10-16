@@ -83,6 +83,22 @@ fn phone_width_uses_compact_layout_with_drawers() {
     h.get_by_label("Tools").click();
     h.run_steps(3);
     assert!(h.query_all_by_label("Close panel").count() >= 1, "the tools drawer opens");
+    // The rail's page and zoom controls move to a bottom bar.
+    for label in ["Previous page", "Next page", "Zoom in", "Zoom out", "Rotate view clockwise"] {
+        h.get_by_label(label);
+    }
+
+    // Touch has no hover: each recent file's remove button shows without one.
+    let mut h = Harness::builder().with_size(egui::vec2(390.0, 1600.0)).build_eframe(|_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.recent.push(pdfcraft_ui_egui::RecentFile { name: "a.pdf".into(), path: "/x/a.pdf".into(), pages: 1, size: 10 });
+        app
+    });
+    h.run_steps(4);
+    h.get_by_label("Remove a.pdf from Recent").click();
+    h.run_steps(2);
+    assert!(h.state().recent.is_empty());
 
     // Desktop width: the usual bars, no compact controls.
     let h = harness(|_| {});

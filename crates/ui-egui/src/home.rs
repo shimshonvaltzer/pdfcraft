@@ -161,7 +161,8 @@ pub fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                 } else {
                     press.wash(ui, rect, 8, false);
                 }
-                if hovered {
+                // Touch has no hover: compact windows always show the remove button.
+                if hovered || compact {
                     // Remove just this file from the list (#430); the file itself is untouched.
                     let x_rect = Rect::from_center_size(rect.right_center() - vec2(26.0, 0.0), vec2(28.0, 28.0));
                     let x = ui.interact(x_rect, ui.id().with(("remove-recent", &r.path)), Sense::click());

@@ -715,6 +715,49 @@ fn main_menu_items(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
     }
 }
 
+/// The rail's page and zoom controls as a bottom bar, for compact windows that hide the rail.
+pub fn compact_nav_bar(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
+    let t = Tokens::get(ui.ctx());
+    let Some((index, id)) = app.active_ids() else { return };
+    let page_count = app.session.get(id).map_or(0, |d| d.info.pages.len());
+    let Some(view) = app.views.get_mut(index) else { return };
+    let b = crate::compact::TOUCH;
+    egui::Panel::bottom("compact_nav")
+        .exact_size(b + 6.0)
+        .frame(egui::Frame::NONE.fill(t.chrome).inner_margin(egui::Margin::symmetric(4, 0)).stroke(Stroke::new(1.0, t.divider)))
+        .show(ui, |ui| {
+            ui.horizontal_centered(|ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                if icons::button(ui, "chevron-up", b, false, tl!("Previous page")).clicked() {
+                    view.step_page(false);
+                }
+                let page = format!("{} / {page_count}", view.current.saturating_add(1).min(page_count.max(1)));
+                ui.label(egui::RichText::new(page).font(theme::medium(12.0)).color(t.text_muted));
+                if icons::button(ui, "chevron-down", b, false, tl!("Next page")).clicked() {
+                    view.step_page(true);
+                }
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.spacing_mut().item_spacing.x = 0.0;
+                    if icons::button(ui, "rotate-cw", b, false, tl!("Rotate view clockwise")).clicked() {
+                        view.rotate_view(true);
+                    }
+                    let fit_icon = if view.fit == Fit::Width { "maximize" } else { "maximize-2" };
+                    if icons::button(ui, fit_icon, b, false, tl!("Toggle fit page / fit width")).clicked() {
+                        view.fit = if view.fit == Fit::Width { Fit::Page } else { Fit::Width };
+                        view.goto = Some((view.current, 0.0));
+                    }
+                    if icons::button(ui, "zoom-in", b, false, tl!("Zoom in")).clicked() {
+                        view.zoom_step(true);
+                    }
+                    ui.label(egui::RichText::new(format!("{:.0}%", view.zoom * 100.0)).font(theme::medium(12.0)).color(t.text_muted));
+                    if icons::button(ui, "zoom-out", b, false, tl!("Zoom out")).clicked() {
+                        view.zoom_step(false);
+                    }
+                });
+            });
+        });
+}
+
 pub fn right_rail(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
     let Some((index, id)) = app.active_ids() else { return };

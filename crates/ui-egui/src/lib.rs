@@ -3142,6 +3142,9 @@ impl eframe::App for PdfCraftApp {
         }
         chrome::tab_strip(self, ui);
         chrome::mode_bar(self, ui);
+        if self.compact {
+            chrome::compact_nav_bar(self, ui);
+        }
         let body = ui.available_rect_before_wrap();
         if self.active.is_some() && !self.compact {
             chrome::right_rail(self, ui);
