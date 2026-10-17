@@ -21,7 +21,10 @@ fn card_lift(ui: &egui::Ui, t: &Tokens, rect: Rect, press: theme::Press) {
 pub fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-        egui::Frame::NONE.inner_margin(egui::Margin { left: 36, right: 36, top: 28, bottom: 28 }).show(ui, |ui| {
+        // Compact (phone-sized) windows: narrower margins and one column of full-width cards.
+        let compact = app.compact;
+        let (side, top) = if compact { (16, 16) } else { (36, 28) };
+        egui::Frame::NONE.inner_margin(egui::Margin { left: side, right: side, top, bottom: top }).show(ui, |ui| {
             ui.label(egui::RichText::new(tl!("Welcome to PdfCraft")).font(theme::semibold(24.0)));
             ui.label(
                 egui::RichText::new(tl!("An open-source PDF workbench — local, private, and scriptable."))
@@ -61,9 +64,10 @@ pub fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                     ui.add_space(10.0);
                     ui.horizontal_wrapped(|ui| {
                         ui.spacing_mut().item_spacing = vec2(14.0, 14.0);
+                        let (card_w, open_w) = if compact { (ui.available_width().max(1.0), ui.available_width().max(1.0)) } else { (190.0, 170.0) };
                         for id in RECOMMENDED {
                             let Some(g) = catalog::group(id) else { continue };
-                            let (rect, resp) = ui.allocate_exact_size(vec2(190.0, 104.0), Sense::click());
+                            let (rect, resp) = ui.allocate_exact_size(vec2(card_w, 104.0), Sense::click());
                             resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!(g.label)));
                             let press = theme::Press::track(ui, &resp);
                             card_lift(ui, &t, rect, press);
@@ -101,7 +105,7 @@ pub fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                                 app.select_tool(g.id);
                             }
                         }
-                        let (rect, resp) = ui.allocate_exact_size(vec2(170.0, 104.0), Sense::click());
+                        let (rect, resp) = ui.allocate_exact_size(vec2(open_w, 104.0), Sense::click());
                         resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!("Open file")));
                         let press = theme::Press::track(ui, &resp);
                         card_lift(ui, &t, rect, press);
@@ -157,7 +161,8 @@ pub fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                 } else {
                     press.wash(ui, rect, 8, false);
                 }
-                if hovered {
+                // Touch has no hover: compact windows always show the remove button.
+                if hovered || compact {
                     // Remove just this file from the list (#430); the file itself is untouched.
                     let x_rect = Rect::from_center_size(rect.right_center() - vec2(26.0, 0.0), vec2(28.0, 28.0));
                     let x = ui.interact(x_rect, ui.id().with(("remove-recent", &r.path)), Sense::click());
@@ -217,6 +222,28 @@ pub fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compact_home_is_one_column_on_a_phone() {
+        crate::i18n::set_current(crate::i18n::Lang::EN);
+        let ctx = egui::Context::default();
+        ctx.set_fonts(theme::font_definitions());
+        let mut app = PdfCraftApp::new();
+        app.compact = true;
+        let input = || egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(390.0, 844.0))), ..Default::default() };
+        let mut output = ctx.run_ui(input(), |ui| show(&mut app, ui));
+        output.textures_delta.clear();
+        let texts: Vec<_> = output.shapes.iter().filter_map(|s| if let egui::Shape::Text(t) = &s.shape { Some(t) } else { None }).collect();
+        let welcome = texts.iter().find(|t| t.galley.job.text == "Welcome to PdfCraft").unwrap();
+        assert_eq!(welcome.galley.rows.len(), 1, "the heading must not wrap");
+        let actions: Vec<_> = texts.iter().filter(|t| t.galley.job.text == "Use now").collect();
+        assert_eq!(actions.len(), RECOMMENDED.len());
+        assert!(actions.iter().all(|a| (a.pos.x - actions[0].pos.x).abs() < 0.5), "one card per row");
+        // Full-width cards: the Open file card's label sits in the middle of the phone.
+        let open = texts.iter().find(|t| t.galley.job.text == "Open file").unwrap();
+        assert!((open.pos.x + open.galley.size().x / 2.0 - 195.0).abs() < 2.0, "{:?}", open.pos);
+        assert!(texts.iter().all(|t| t.pos.x + t.galley.size().x <= 390.0 + 0.5 || t.galley.job.text.contains('/')), "nothing past the right edge");
+    }
 
     #[test]
     fn translated_card_description_leaves_room_for_the_action() {

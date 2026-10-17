@@ -396,6 +396,14 @@ pub fn show(app: &mut crate::PdfCraftApp, ui: &mut egui::Ui) {
         // Availability is a render projection: the saved group, selection and width survive Home.
         let _ = rendered.apply(Action::Close { panel: Panel::Inspector });
     }
+    if app.compact {
+        // Compact windows show the side panels as drawers over the page (`compact`), not here.
+        for panel in [Panel::Tools, Panel::Inspector] {
+            if rendered.contains(&panel) {
+                let _ = rendered.apply(Action::Close { panel });
+            }
+        }
+    }
     let output = DockArea::new(egui::Id::new("pdfcraft-docking")).show_with_limits(
         ui,
         &rendered,
@@ -427,6 +435,10 @@ pub fn show(app: &mut crate::PdfCraftApp, ui: &mut egui::Ui) {
     publish_visibility(app, &workspace);
     app.docking = workspace;
     for mut action in output.actions {
+        // Splits resized in the compact projection don't match the saved desktop layout.
+        if app.compact && matches!(action, Action::ResizeSplit { .. }) {
+            continue;
+        }
         if app.active.is_none()
             && let Action::ResizeSplit { path, .. } = &mut action
         {

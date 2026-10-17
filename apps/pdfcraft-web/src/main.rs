@@ -54,6 +54,7 @@ fn main() {
                     // eframe never raises a close request on a browser reload or tab close, so `guard_quit` never
                     // prompts; ask the browser to confirm instead while a document has unsaved work (#812).
                     warn_before_unload(app.unsaved_flag.clone());
+                    keep_canvas_backing(cc.egui_ctx.clone());
                     // `?host=parent`: a same-origin page embedding PdfCraft in an iframe (such
                     // as the Nextcloud app) passes files in and takes saves back (`host` below).
                     if query_param("host").as_deref() == Some("parent")
@@ -97,6 +98,50 @@ fn warn_before_unload(unsaved: std::sync::Arc<std::sync::atomic::AtomicBool>) {
     });
     if window.add_event_listener_with_callback("beforeunload", handler.as_ref().unchecked_ref()).is_ok() {
         handler.forget();
+    }
+}
+
+/// The canvas's backing size in device pixels for a CSS size and device pixel ratio, or `None`
+/// for a size that isn't a usable positive number. Capped so a nonsense ratio can't allocate a
+/// huge drawing buffer.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+fn backing_size(css_width: f64, css_height: f64, dpr: f64) -> Option<(u32, u32)> {
+    const MAX: f64 = 16_384.0;
+    let ok = |v: f64| v.is_finite() && v > 0.0;
+    if !(ok(css_width) && ok(css_height) && ok(dpr)) {
+        return None;
+    }
+    // Finite, positive and clamped to MAX, so the casts can't overflow.
+    Some(((css_width * dpr).round().clamp(1.0, MAX) as u32, (css_height * dpr).round().clamp(1.0, MAX) as u32))
+}
+
+/// eframe sizes the canvas from the ResizeObserver's `devicePixelContentBoxSize`. Some browsers
+/// (Chromium's mobile emulation among them) report that in CSS pixels, so on a 2-3x screen the
+/// canvas gets a third to half the pixels it needs, and egui, which divides the canvas by the
+/// device pixel ratio, lays out a 390-pixel-wide phone as 130-195 points. Check four times a
+/// second and give the canvas its full device-pixel size when it is short.
+#[cfg(target_arch = "wasm32")]
+fn keep_canvas_backing(ctx: egui::Context) {
+    use eframe::wasm_bindgen::{JsCast, closure::Closure};
+    let Some(window) = web_sys::window() else { return };
+    let check = Closure::<dyn FnMut()>::new(move || {
+        let Some(window) = web_sys::window() else { return };
+        let Some(canvas) =
+            window.document().and_then(|d| d.get_element_by_id("pdfcraft")).and_then(|e| e.dyn_into::<web_sys::HtmlCanvasElement>().ok())
+        else {
+            return;
+        };
+        let rect = canvas.get_bounding_client_rect();
+        let Some((w, h)) = backing_size(rect.width(), rect.height(), window.device_pixel_ratio()) else { return };
+        // Within two pixels is rounding, not a short canvas.
+        if canvas.width().abs_diff(w) > 2 || canvas.height().abs_diff(h) > 2 {
+            canvas.set_width(w);
+            canvas.set_height(h);
+            ctx.request_repaint();
+        }
+    });
+    if window.set_interval_with_callback_and_timeout_and_arguments_0(check.as_ref().unchecked_ref(), 250).is_ok() {
+        check.forget();
     }
 }
 
@@ -248,4 +293,19 @@ mod host {
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {
     eprintln!("pdfcraft-web targets wasm32: run `trunk serve` or `trunk build --release` in apps/pdfcraft-web");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::backing_size;
+
+    #[test]
+    fn backing_size_scales_by_the_device_pixel_ratio() {
+        assert_eq!(backing_size(390.0, 844.0, 3.0), Some((1170, 2532)));
+        assert_eq!(backing_size(390.0, 844.0, 1.0), Some((390, 844)));
+        assert_eq!(backing_size(1e9, 10.0, 3.0), Some((16_384, 30)));
+        for (w, h, d) in [(0.0, 1.0, 1.0), (1.0, f64::NAN, 1.0), (1.0, 1.0, f64::INFINITY), (1.0, 1.0, -2.0)] {
+            assert_eq!(backing_size(w, h, d), None);
+        }
+    }
 }

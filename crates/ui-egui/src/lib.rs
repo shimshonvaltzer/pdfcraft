@@ -34,6 +34,7 @@ mod appearance;
 pub mod canvas;
 mod chrome;
 mod combine_grid;
+mod compact;
 mod image_pick;
 mod tags_ui;
 pub use combine_grid::ThumbState as CombineThumb;
@@ -504,6 +505,10 @@ pub struct PdfCraftApp {
     mode_override: Option<Mode>,
     pub left: LeftPanel,
     pub left_open: bool,
+    /// The window is phone-sized this frame (see `compact`); never persisted.
+    pub compact: bool,
+    /// The drawer a compact window shows over the page, if any.
+    pub compact_drawer: Option<compact::Drawer>,
     pub right: Option<RightPanel>,
     /// The right panel that was open when the user switched to Read mode, which starts with the
     /// panes closed; leaving Read mode brings it back unless the user opened or closed a pane in
@@ -898,6 +903,8 @@ impl PdfCraftApp {
             docking: docking::Workspace::default(),
             pending_panel_reveals: Vec::new(),
             left_open: true,
+            compact: false,
+            compact_drawer: None,
             right: None,
             right_before_read: None,
             comments_panel_closed: false,
@@ -2115,6 +2122,10 @@ impl PdfCraftApp {
 
     pub(crate) fn reveal_tools(&mut self) {
         self.left_open = true;
+        // A compact window shows tools in a drawer; Read mode has none to show.
+        if self.compact && self.mode != Mode::Read {
+            self.compact_drawer = Some(compact::Drawer::Tools);
+        }
         self.pending_panel_reveals.push(docking::Panel::Tools);
     }
 
@@ -2192,6 +2203,11 @@ impl PdfCraftApp {
     /// Opens a right panel, or closes it with `None`, because the user chose to. Closing Comments
     /// keeps comment tools from reopening it; opening it again lets them (#225). A choice made in
     /// Read mode replaces the pane saved on the way in, so leaving Read mode doesn't undo it.
+    /// Opens `drawer` in a compact window, or closes it when it is already open.
+    pub(crate) fn toggle_drawer(&mut self, drawer: compact::Drawer) {
+        self.compact_drawer = if self.compact_drawer == Some(drawer) { None } else { Some(drawer) };
+    }
+
     pub fn choose_right_panel(&mut self, panel: Option<RightPanel>) {
         if self.mode == Mode::Read {
             self.right_before_read = None;
@@ -3117,9 +3133,20 @@ impl eframe::App for PdfCraftApp {
         if self.draws_window_frame() {
             window_controls::resize_edges(&ctx);
         }
+        // Phone-sized: drawers instead of side panels, one-row bars, touch-sized controls.
+        self.compact = compact::is_compact(ctx.content_rect().width());
+        if self.compact {
+            compact::touch_style(ui.style_mut());
+        } else {
+            self.compact_drawer = None;
+        }
         chrome::tab_strip(self, ui);
         chrome::mode_bar(self, ui);
-        if self.active.is_some() {
+        if self.compact {
+            chrome::compact_nav_bar(self, ui);
+        }
+        let body = ui.available_rect_before_wrap();
+        if self.active.is_some() && !self.compact {
             chrome::right_rail(self, ui);
             // Read mode hides the tools, not the navigation panes: the rail stays visible
             // there, so its buttons (Bookmarks, Page thumbnails, ...) must open their panels.
@@ -3148,6 +3175,9 @@ impl eframe::App for PdfCraftApp {
                 docking::show(self, ui);
             }
         });
+        if self.compact {
+            compact::show_drawer(self, &ctx, body);
+        }
         self.process_pending_edits();
         palette::show(self, &ctx);
         dialogs::show(self, &ctx);

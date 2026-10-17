@@ -59,6 +59,54 @@ fn tools_panel_side_preference_moves_and_persists() {
     assert!(!h.state().docking.tools_on_right());
 }
 
+/// A phone-sized window (390 points wide) collapses the side panels into drawers and keeps the
+/// desktop layout at normal widths.
+#[test]
+fn phone_width_uses_compact_layout_with_drawers() {
+    let mut h = Harness::builder().with_size(egui::vec2(390.0, 844.0)).build_eframe(|_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("fixture.pdf", None, FIXTURE.to_vec()).unwrap();
+        app
+    });
+    h.run_steps(4);
+    assert!(h.state().compact);
+    // No rail and no tools panel until asked for.
+    assert_eq!(h.query_all_by_label("Page thumbnails").count(), 0, "the rail is hidden");
+    assert_eq!(h.query_all_by_label("Close panel").count(), 0, "no drawer is open");
+    h.get_by_label("Panels").click();
+    h.run_steps(3);
+    assert!(h.query_all_by_label("Page thumbnails").count() >= 1, "the panels drawer switches panels");
+    h.get_by_label("Close panel").click();
+    h.run_steps(3);
+    assert_eq!(h.query_all_by_label("Close panel").count(), 0, "the drawer closes");
+    h.get_by_label("Tools").click();
+    h.run_steps(3);
+    assert!(h.query_all_by_label("Close panel").count() >= 1, "the tools drawer opens");
+    // The rail's page and zoom controls move to a bottom bar.
+    for label in ["Previous page", "Next page", "Zoom in", "Zoom out", "Rotate view clockwise"] {
+        h.get_by_label(label);
+    }
+
+    // Touch has no hover: each recent file's remove button shows without one.
+    let mut h = Harness::builder().with_size(egui::vec2(390.0, 1600.0)).build_eframe(|_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.recent.push(pdfcraft_ui_egui::RecentFile { name: "a.pdf".into(), path: "/x/a.pdf".into(), pages: 1, size: 10 });
+        app
+    });
+    h.run_steps(4);
+    h.get_by_label("Remove a.pdf from Recent").click();
+    h.run_steps(2);
+    assert!(h.state().recent.is_empty());
+
+    // Desktop width: the usual bars, no compact controls.
+    let h = harness(|_| {});
+    assert!(!h.state().compact);
+    assert_eq!(h.query_all_by_label("More").count(), 0);
+    h.get_by_label("Menu");
+}
+
 /// Every piece of text painted on the last frame: its whole text, whether it was cut with "…",
 /// and where it was drawn.
 fn painted_text(h: &Harness<'static, PdfCraftApp>) -> Vec<(String, bool, egui::Rect)> {
